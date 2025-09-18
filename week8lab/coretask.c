@@ -24,26 +24,35 @@ bool is_prime(int a){
 }
 
 int main(int argc, char **argv){
+    
     MPI_Init(&argc, &argv);
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    int n = 0;
     struct timespec start, finish;
     double elapsed;
-    int n = 0;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
     if (rank == 0) {
         n = atoi(argv[1]);
-        clock_gettime(CLOCK_MONOTONIC, &start);
     }
 
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     int *local_primes = malloc((n/size + size) * sizeof(int)); // Allocate enough space
     int index = 0;
+    
+    // Handle the case for 2 separately
+    if (n >= 2 && rank == 0) {
+        local_primes[index++] = 2; // Include 2 if in range
+    }
 
     // round robin distribution of work
-    for (int i = rank; i < n; i += size) {
+    // Starts from 3, checks only odd numbers (even numbers besides 2 are not prime trivially)
+    // Eg. 3 processes: P0 -> 3,9,15,...; P1 -> 5,11,17,...; P2 -> 7,13,19,...
+    for (int i = 3 + 2 * rank; i < n; i += 2 * size) {
         if (is_prime(i)) {
             local_primes[index++] = i;
         }
@@ -97,5 +106,6 @@ int main(int argc, char **argv){
     }
     free(local_primes);
     MPI_Finalize();
+
     return 0;
 }
