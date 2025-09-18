@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
         time_taken = (double) (end.tv_sec - start.tv_sec) * 1e9;
         time_taken = (time_taken + (double) (end.tv_nsec - start.tv_nsec)) *
                      1e-9;
-        printf("Calculated Pi value (Serial-AlgoI) = %12.9f\n",
+        printf("Calculated Pi value (Parallel-AlgoI) = %12.9f\n",
                piVal);
         printf("Overall time (s): %lf\n", time_taken); // ts
     }
