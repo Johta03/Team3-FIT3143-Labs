@@ -124,6 +124,8 @@ int master_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	MPI_Comm_rank(world_comm, &global_rank);
 	MPI_Comm_size(comm, &local_size);
 	MPI_Comm_rank(comm, &local_rank);
+	
+	int master_rank = global_size - 1;  // Master's rank in MPI_COMM_WORLD
 
 	// Auto-calculate grid dimensions if not specified
 	if(nrows == 0 && ncols == 0)
@@ -158,7 +160,9 @@ int master_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 		tick++;
 		
 		// Broadcast tick to ALL processes for synchronization
-		MPI_Bcast(&tick, 1, MPI_INT, global_rank, MPI_COMM_WORLD);
+		// This ensures all processes are on the same tick, eliminating clock drift
+		// MPI_Bcast acts as implicit barrier - all processes wait here until master sends
+		MPI_Bcast(&tick, 1, MPI_INT, master_rank, MPI_COMM_WORLD);
 
 		// -Player Movement simulated
 		// Strategy: Move toward column with closest (bottom-most) alive invader
@@ -444,7 +448,6 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	int randNum, avgNum, recvNum_left = 0, recvNum_right = 0, recvNum_top = 0, recvNum_bottom = 0;
 	int tick = 0, loop = 1, isDisabled = 0;  // tick will be received via MPI_Bcast
 	int my_col_rank, col_size;
-	int master_rank = global_size - 1;  // Master is highest rank
 	
 	MPI_Status status, probe_status;
 	MPI_Request send_request[4], receive_request[4];
@@ -454,6 +457,8 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	MPI_Comm_rank(world_comm, &global_rank);
 	MPI_Comm_size(comm, &local_size);
 	MPI_Comm_rank(comm, &local_rank);
+	
+	int master_rank = global_size - 1;  // Master's rank in MPI_COMM_WORLD (must be after MPI_Comm_size)
 	
 	// Seed random number generator uniquely per process
 	srand(time(NULL) + global_rank);
@@ -564,12 +569,12 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 				int travel_time = 2 + (nrows - 1 - coord[0]);
 				int msg_data[2] = {travel_time, coord[1]};
 				MPI_Send(msg_data, 2, MPI_INT, global_size-1, MSG_CANNONBALL_FROM_INVADER, world_comm);
+			}
 		}
+		// No sleep needed - MPI_Bcast synchronizes with master's tick
 	}
-	// No sleep needed - MPI_Bcast synchronizes with master's tick
-}
-
-// Cleanup
+	
+	// Cleanup
 	MPI_Comm_free(&col_comm);
 	MPI_Comm_free(&comm2D);
 	return 0;
