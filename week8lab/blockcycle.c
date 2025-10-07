@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
-#include <time.h>
 #include <string.h>
 
 int comp(const void *a, const void *b) {
@@ -28,8 +27,10 @@ int main(int argc, char **argv){
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     int n = 0;
-    struct timespec start, finish;
-    double elapsed;
+
+    // === Timing variables ===
+    double total_start, total_end;
+    double comp_time = 0.0, comm_time = 0.0, ser_time = 0.0;
 
     if (rank == 0) {
         if (argc < 2) {
@@ -37,24 +38,26 @@ int main(int argc, char **argv){
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
         n = atoi(argv[1]);
-        clock_gettime(CLOCK_MONOTONIC, &start);
     }
 
-    // Broadcast n to everyone
+    total_start = MPI_Wtime(); // start total timing
+
+    // Broadcast n (communication)
+    double t0 = MPI_Wtime();
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    comm_time += MPI_Wtime() - t0;
 
-    // Block size for block-cyclic distribution
     const int block_size = 100;
-
     int *local_primes = malloc((n/size + block_size) * sizeof(int));
     int index = 0;
 
-    // Handle 2 separately
+    // Handle 2 separately (serial, but negligible)
     if (rank == 0 && n >= 2) {
         local_primes[index++] = 2;
     }
 
-    // Assign chunks of size `block_size` in a round-robin manner
+    // === Compute portion ===
+    double comp_start = MPI_Wtime();
     for (int start_num = 3 + rank * block_size;
          start_num < n;
          start_num += block_size * size) {
@@ -62,7 +65,6 @@ int main(int argc, char **argv){
         int end_num = start_num + block_size;
         if (end_num > n) end_num = n;
 
-        // Only check odd numbers
         for (int i = (start_num % 2 == 0 ? start_num + 1 : start_num);
              i < end_num;
              i += 2) {
@@ -71,6 +73,7 @@ int main(int argc, char **argv){
             }
         }
     }
+    comp_time = MPI_Wtime() - comp_start;
 
     int local_count = index;
     int *all_counts = NULL, *displacements = NULL;
@@ -82,8 +85,10 @@ int main(int argc, char **argv){
         displacements = malloc(size * sizeof(int));
     }
 
-    // Gather counts from all processes
+    // === Communication: Gather counts ===
+    t0 = MPI_Wtime();
     MPI_Gather(&local_count, 1, MPI_INT, all_counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    comm_time += MPI_Wtime() - t0;
 
     if (rank == 0) {
         displacements[0] = 0;
@@ -95,12 +100,17 @@ int main(int argc, char **argv){
         global_primes = malloc(total_primes * sizeof(int));
     }
 
-    // Gather actual primes
+    // === Communication: Gather primes ===
+    t0 = MPI_Wtime();
     MPI_Gatherv(local_primes, local_count, MPI_INT,
                 global_primes, all_counts, displacements, MPI_INT,
                 0, MPI_COMM_WORLD);
+    comm_time += MPI_Wtime() - t0;
 
+    // === Root serial work (sorting + writing file) ===
     if (rank == 0) {
+        double ser_start = MPI_Wtime();
+
         qsort(global_primes, total_primes, sizeof(int), comp);
 
         FILE *fptr = fopen("coretask.txt", "w");
@@ -109,19 +119,34 @@ int main(int argc, char **argv){
         }
         fclose(fptr);
 
-        clock_gettime(CLOCK_MONOTONIC, &finish);
-        elapsed = (finish.tv_sec - start.tv_sec);
-        elapsed += (finish.tv_nsec - start.tv_nsec) / 1e9;
+        ser_time = MPI_Wtime() - ser_start;
+    }
 
-        printf("Total primes: %d\n", total_primes);
-        printf("Elapsed time: %f seconds\n", elapsed);
+    total_end = MPI_Wtime();
 
+    // === Reduce times to root ===
+    double comp_max, comm_max;
+    MPI_Reduce(&comp_time, &comp_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&comm_time, &comm_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        double total_time = total_end - total_start;
+
+        printf("\n=== Timing Breakdown (p=%d) ===\n", size);
+        printf("Total primes found: %d\n", total_primes);
+        printf("Total time    : %.6f s\n", total_time);
+        printf("Compute time  : %.6f s (max across ranks)\n", comp_max);
+        printf("Comm time     : %.6f s (max across ranks)\n", comm_max);
+        printf("Serial (root) : %.6f s\n", ser_time);
+    }
+
+    free(local_primes);
+    if (rank == 0) {
         free(all_counts);
         free(displacements);
         free(global_primes);
     }
 
-    free(local_primes);
     MPI_Finalize();
     return 0;
 }

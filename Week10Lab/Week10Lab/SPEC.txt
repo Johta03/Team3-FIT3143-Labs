@@ -1,0 +1,85 @@
+MESSAGE PASSING INTERFACE (MPI) III - LAB WEEK 10 SPECIFICATION
+
+CORE TASK - Space Invaders Simulation
+
+===============================================================================
+GAME RULES (Section e)
+===============================================================================
+
+e.i) PLAYER MOVEMENT:
+- Starts at column 0 (leftmost)
+- Can move left/right/stay every 1 second
+- Cannot move beyond grid boundaries
+
+e.ii) PLAYER FIRING:
+- Fires automatically every 1 second (after moving)
+- Targets bottom-most surviving invader in current column
+
+e.iii) PLAYER CANNONBALL TRAVEL TIME:
+- Bottom row: 2 seconds
+- Each additional row: +1 second
+- Formula: 2 + (distance from bottom row)
+- Example 3-row grid: Row 2=2sec, Row 1=3sec, Row 0=4sec
+
+e.iv) INVADER BEHAVIOR:
+- Invaders do NOT move
+- Die immediately when hit by player cannonball
+- FIRING: Every 4 seconds, check with 10% probability (0.1 uniform chance)
+- ONLY bottom-most surviving invader in each column can fire
+
+e.v) INVADER CANNONBALL TRAVEL TIME:
+- Same as player: 2 seconds for bottom row + 1 per additional row
+- Formula: 2 + (distance from bottom row)
+
+e.vi) WIN/LOSS CONDITIONS:
+- Player WINS: All invaders terminated
+- Player LOSES: Hit by invader cannonball (dies immediately)
+- Game terminates immediately upon either condition
+
+===============================================================================
+KEY IMPLEMENTATION REQUIREMENTS
+===============================================================================
+
+1. ARCHITECTURE:
+   - 1 MPI process per invader (slaves)
+   - 1 MPI process for player (master)
+   - 2D Cartesian grid topology for invaders
+
+2. MESSAGE TYPES:
+   - MSG_REPORT: Invader status updates
+   - MSG_DISABLE: Individual invader death
+   - MSG_TERMINATE: Game over (all processes)
+   - MSG_CANNONBALL_FROM_PLAYER: Player fires
+   - MSG_CANNONBALL_FROM_INVADER: Invader fires
+
+3. TIMING:
+   - All processes use master-controlled logical time
+   - No sleep() for timing - use tick counter
+   - 1 tick = 1 second game time
+
+4. GRID DISPLAY:
+   - Show all invader states (A=Active, D=Disabled, X=Terminated)
+   - Show player position
+   - Show cannonballs in flight with countdown
+
+===============================================================================
+EXTENDED TASK (For HD)
+===============================================================================
+
+a) CANNONBALL DEFLECTION:
+   - 20% chance: deflect left, kill left invader
+   - 15% chance: deflect right, kill right invader
+   - 20% chance: blocked by shield (no kill)
+   - 45% chance: hit target (normal kill)
+
+b) INVADER REBORN:
+   - Dead invader can respawn if BOTH left AND right neighbors alive
+   - 20% chance every 5 seconds
+
+c) MULTI-PLAYER:
+   - Support 2+ players (separate MPI processes)
+   - Each has own cannon
+   - Prevent cannon overlap/collision
+
+===============================================================================
+

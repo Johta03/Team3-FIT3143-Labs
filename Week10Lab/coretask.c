@@ -156,6 +156,9 @@ int master_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	// === MAIN GAME LOOP ===
 	while(1){
 		tick++;
+		
+		// Broadcast tick to ALL processes for synchronization
+		MPI_Bcast(&tick, 1, MPI_INT, global_rank, MPI_COMM_WORLD);
 
 		// -Player Movement simulated
 		// Strategy: Move toward column with closest (bottom-most) alive invader
@@ -439,8 +442,9 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	MPI_Comm comm2D, col_comm;
 	int dims[ndims], coord[ndims], wrap_around[ndims];
 	int randNum, avgNum, recvNum_left = 0, recvNum_right = 0, recvNum_top = 0, recvNum_bottom = 0;
-	int slave_tick = 0, loop = 1, isDisabled = 0;
+	int tick = 0, loop = 1, isDisabled = 0;  // tick will be received via MPI_Bcast
 	int my_col_rank, col_size;
+	int master_rank = global_size - 1;  // Master is highest rank
 	
 	MPI_Status status, probe_status;
 	MPI_Request send_request[4], receive_request[4];
@@ -489,6 +493,9 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 
 	// === MAIN INVADER LOOP ===
 	while(loop) {
+		// Receive synchronized tick from master (blocks until master broadcasts)
+		MPI_Bcast(&tick, 1, MPI_INT, master_rank, MPI_COMM_WORLD);
+		
 		// Check for messages from master
 		MPI_Iprobe((global_size-1), MPI_ANY_TAG, world_comm, &flag, &probe_status);
 		if(flag){
@@ -541,8 +548,8 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 			if(!test_flag) MPI_Cancel(&receive_request[i]);
 		}
 
-		// If alive, send reports and potentially fire
-		if(!isDisabled && (slave_tick % 4 == 0)){
+		// If alive, send reports and potentially fire (every 4 ticks)
+		if(!isDisabled && (tick % 4 == 0)){
 			avgNum = (recvNum_left + recvNum_right + recvNum_top + recvNum_bottom) / 4;
 			sleep(2 + coord[0]);
 			MPI_Send(&avgNum, 1, MPI_INT, global_size-1, MSG_REPORT, world_comm);
@@ -557,14 +564,12 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 				int travel_time = 2 + (nrows - 1 - coord[0]);
 				int msg_data[2] = {travel_time, coord[1]};
 				MPI_Send(msg_data, 2, MPI_INT, global_size-1, MSG_CANNONBALL_FROM_INVADER, world_comm);
-			}
 		}
-		
-		sleep(1);
-		slave_tick++;
 	}
-	
-	// Cleanup
+	// No sleep needed - MPI_Bcast synchronizes with master's tick
+}
+
+// Cleanup
 	MPI_Comm_free(&col_comm);
 	MPI_Comm_free(&comm2D);
 	return 0;
