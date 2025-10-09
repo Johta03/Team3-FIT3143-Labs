@@ -478,8 +478,8 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 	MPI_Cart_create(comm, ndims, dims, wrap_around, 0, &comm2D);
 	
 	// Get coordinates and neighbors
-	MPI_Cart_coords(comm2D, local_rank, ndims, coord);
-	MPI_Cart_rank(comm2D, coord, &my_cart_rank);
+	MPI_Comm_rank(comm2D, &my_cart_rank);
+	MPI_Cart_coords(comm2D, my_cart_rank, ndims, coord);
 	MPI_Cart_shift(comm2D, SHIFT_ROW, DISP, &nbr_i_lo, &nbr_i_hi);
 	MPI_Cart_shift(comm2D, SHIFT_COL, DISP, &nbr_j_lo, &nbr_j_hi);
 	
@@ -560,11 +560,20 @@ int slave_io(MPI_Comm world_comm, MPI_Comm comm, int nrows, int ncols)
 			MPI_Send(&avgNum, 1, MPI_INT, global_size-1, MSG_REPORT, world_comm);
 			
 			// === DECENTRALIZED FIRING LOGIC ===
-			// Determine if I'm bottom-most in my column using column communicator
-			// Bottom-most has highest row coordinate in column
-			int am_bottom_most = (coord[0] == nrows - 1);
+			// Determine if I'm bottom-most ALIVE in my column using column communicator
+			// I am alive if I haven't been disabled
+			int alive = !isDisabled;
 			
-			// Could also use MPI_Allreduce on col_comm to find max row, but simple check works for now
+			// Vote with my row if alive; otherwise vote -1
+			int my_row_or_neg1 = alive ? coord[0] : -1;
+			
+			// Find the maximum row among alive ranks in *my column only*
+			int bottom_alive_row = -1;
+			MPI_Allreduce(&my_row_or_neg1, &bottom_alive_row, 1,
+			              MPI_INT, MPI_MAX, col_comm);
+			
+			// True only for the lowest-row *alive* process in this column
+			int am_bottom_most = (alive && coord[0] == bottom_alive_row);
 			if(am_bottom_most && (rand() % 100) < 10) {  // 10% chance
 				int travel_time = 2 + (nrows - 1 - coord[0]);
 				int msg_data[2] = {travel_time, coord[1]};
